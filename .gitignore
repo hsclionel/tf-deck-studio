@@ -1,0 +1,20 @@
+# Python / tooling
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Runtime state of the local service
+logs/
+*.pid
+
+# Personal saves, game files and data extracted from ISOs (never commit)
+backups/
+testdata/
+rom/
+work/
+*.iso
+*.cso
+
+# Built-in game-original cards: contain text from the game, generate locally (tfcore.cli pool)
+tfcore/gamecards/*.json

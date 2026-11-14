@@ -1,0 +1,5 @@
+{
+  "_comment": "Real cards a game lacks, mapped to that game's own original card with the same effect. Used only when the game does not have the real card (so TFSP keeps its real 反查). Keys are the real card's Konami number; names and passcode let imports and wiki decks find it.",
+  "11180": {"to": 3643, "passcode": 34507039, "names": ["反查", "Wiretap", "ギャクタン"],
+            "why": "TF6 has no 反查 (Wiretap); its original 陷阱封锁 has the same effect and artwork"}
+}

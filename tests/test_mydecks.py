@@ -1,0 +1,50 @@
+from tfcore import deckcatalog, mydecks
+
+
+def _deck(name, main, stamp=None):
+    return dict(name=name, main=list(main), extra=[], side=[], stamp=stamp)
+
+
+def test_draft_round_trip(tmp_path):
+    orig = {0: _deck('A', [1, 2], (2026, 10, 1)), 1: _deck('B', [3], (2026, 10, 2))}
+    work = {0: _deck('A', [1, 2, 2], (2026, 10, 1)), 1: _deck('B', [3], (2026, 10, 2)), 5: _deck('新', [7])}
+    drafts = mydecks.Drafts(str(tmp_path))
+    changed = mydecks.changed(work, orig)
+    assert set(changed) == {0, 5} and changed[0]['base'] == [2026, 10, 1] and changed[5]['base'] is None
+    drafts.store(r'C:\x\ULJM059400001', changed)
+
+    fresh = {i: dict(d) for i, d in orig.items()}                      # the page reloads
+    restored, moved = mydecks.restore(fresh, orig, drafts.load(r'C:\x\ULJM059400001'))
+    assert restored == [0, 5] and moved == [] and fresh[0]['main'] == [1, 2, 2] and fresh[5]['name'] == '新'
+    assert fresh[0]['stamp'] == (2026, 10, 1)
+
+    drafts.store(r'C:\x\ULJM059400001', {})                             # saved or dropped
+    assert drafts.load(r'C:\x\ULJM059400001') == {}
+
+
+def test_draft_reports_decks_the_game_changed(tmp_path):
+    drafts = mydecks.Drafts(str(tmp_path))
+    drafts.store('save', mydecks.changed({0: _deck('A', [9])}, {0: _deck('A', [1], (2026, 1, 1))}))
+    later = {0: _deck('A', [1, 4], (2026, 2, 2)), 1: _deck('B', [2], (2026, 2, 2))}
+    work = {i: dict(d) for i, d in later.items()}
+    assert mydecks.restore(work, later, drafts.load('save')) == ([0], [0])
+    assert work[0]['main'] == [9]
+
+
+def test_draft_already_saved_is_skipped(tmp_path):
+    orig = {0: _deck('A', [1, 2], (2026, 1, 1))}
+    work = {0: dict(orig[0])}
+    assert mydecks.restore(work, orig, {0: {**_deck('A', [1, 2]), 'base': [2026, 1, 1]}}) == ([], [])
+
+
+def test_library_and_catalog(tmp_path):
+    lib = mydecks.Library(str(tmp_path))
+    first = lib.save('TF6', '真六武众', _deck('x', [1, 2, 3]))
+    assert lib.save('TF6', '真六武众', _deck('x', [1, 2])) == first      # same name: replaced
+    lib.save('TFSP', '其他', _deck('y', [4]))
+    assert [d['name'] for d in lib.load('TF6')] == ['真六武众'] and lib.load('TF6')[0]['main'] == [1, 2]
+    entries = deckcatalog.from_library(lib.load('TF6'), {1: None})
+    assert entries[0].key == f'my:{first}' and entries[0].group == deckcatalog.MINE
+    assert entries[0].main == [1] and entries[0].missing == ['#2']
+    lib.remove(first)
+    assert lib.load('TF6') == []
