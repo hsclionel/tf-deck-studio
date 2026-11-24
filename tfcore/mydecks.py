@@ -37,9 +37,13 @@ def _stamp(deck):
     return list(s) if s else None
 
 
-def changed(work, orig):
-    """{slot: deck} for the slots whose edits differ from the save (`base` = the save deck's stamp)."""
-    out = {}
+def changed(work, orig, removed=()):
+    """{slot: deck} for the slots whose edits differ from the save (`base` = the save deck's stamp).
+
+    Slots in `removed` come back as None: the draft has to remember deletions, or closing the tab
+    would quietly bring a deleted deck back.
+    """
+    out = {i: None for i in removed if i not in work}
     for i, w in work.items():
         o = orig.get(i)
         if o is None and not any(w[s] for s in SECTIONS):
@@ -51,17 +55,25 @@ def changed(work, orig):
 
 
 def restore(work, orig, draft):
-    """Put the draft decks into `work`. Returns (restored slots, slots the save changed since)."""
-    restored, moved = [], []
+    """Put the draft into `work`, deletions included.
+
+    Returns (restored slots, slots the save changed since, deleted slots).
+    """
+    restored, moved, deleted = [], [], []
     for i, d in sorted(draft.items()):
         o = orig.get(i)
+        if d is None:
+            if o is not None and i in work:
+                work.pop(i)
+                deleted.append(i)
+            continue
         if o is not None and all(d[k] == o[k] for k in ('name', *SECTIONS)):
             continue                                    # already in the save (saved from another tab)
         work[i] ={'name': d['name'], **{s: list(d[s]) for s in SECTIONS}, 'stamp': o['stamp'] if o else None}
         restored.append(i)
         if d.get('base') != _stamp(o):
             moved.append(i)
-    return restored, moved
+    return restored, moved, deleted
 
 
 class Drafts:

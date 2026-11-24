@@ -164,10 +164,14 @@ class Session:
         out += [f'{self.source.name_of(n, str(n))} ×{k} (max 3)' for n, k in counts.items() if k > 3]
         return out
 
-    def commit(self, decks):
-        """Write {slot: Deck} into the save file (backup first); returns the backup folder."""
+    def commit(self, decks, removed=()):
+        """Write {slot: Deck} into the save file, delete the slots in `removed` (backup first);
+        returns the backup folder. Deleting first means a duplicate can land in a slot freed in
+        the same save."""
         if self.read_only:
             raise PermissionError(f'{self.game.short} saves are read-only for now')
+        for slot in removed:
+            self.save.delete_deck(slot)
         for slot, deck in decks.items():
             self.save.write_deck(slot, deck)
         backup = self.folder.write(self.save.data, self.ws.backups)

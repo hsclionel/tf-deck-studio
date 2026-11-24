@@ -99,6 +99,13 @@ class TF6Save:
         struct.pack_into('<I', d, o + N_SIDE, len(deck.side))
         d[o + SIDE:o + SIDE + 0x1E] = struct.pack(f'<{len(deck.side)}H', *deck.side).ljust(0x1E, b'\0')
 
+    def delete_deck(self, slot):
+        """Free a deck slot the way the game does: clear the in-use flag and every field
+        write_deck fills in (name through side). +0x0-0x4 and the trailing 62 bytes stay put."""
+        o, d = self._off(slot), self.data
+        struct.pack_into('<I', d, o + IN_USE, 0)
+        d[o + NAME:o + SIDE + 0x1E] = b'\0' * (SIDE + 0x1E - NAME)
+
     # ---- trunk (read-only)
     def trunk(self, row):
         """(owned copies, copies allowed by the save's ban-list cache, low flag byte)."""

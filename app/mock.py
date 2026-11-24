@@ -6,12 +6,13 @@ All data comes the way the real app gets it: a catalog built from the user's ISO
 (`python -m tfcore.cli catalog <iso> --cache testdata/cache`) and the save folder in
 testdata/memstick, opened with tfcore.
 """
-import collections, html, pathlib, re, sys, unicodedata
+import collections, html, pathlib, sys
 
 from nicegui import app, ui
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
+from tfcore import textsearch  # noqa: E402
 from tfcore.catalog import Catalog  # noqa: E402
 from tfcore.savefolder import SaveFolder  # noqa: E402
 from tfcore.tf6save import NSLOTS, TF6Save  # noqa: E402
@@ -31,8 +32,8 @@ EXTRA_FRAMES = ('fusion', 'synchro', 'xyz')
 
 
 def search_key(s):
-    """Full-width → half-width, lower case, separators dropped: 'Ｅ·ＨＥＲＯ　天空侠' → 'ehero天空侠'."""
-    return re.sub(r'[\s·・\-－_.,，。!！]', '', unicodedata.normalize('NFKC', s)).lower()
+    """Same rules as the real app (tfcore.textsearch), so the mock matches like the app does."""
+    return textsearch.normalize(s)
 
 
 def load_data():
@@ -47,7 +48,7 @@ def load_data():
                             kind={'SPELL': 'Spell', 'TRAP': 'Trap'}.get(c.attribute, c.attribute),
                             atk=c.atk, dfn=c.defense, level=c.level, name=c.name.replace('　', ' '),
                             frame=c.frame, arts=c.arts, owned=owned, allowed=allowed,
-                            key=search_key(c.name), text=c.text)
+                            key=search_key(c.name), text_key=search_key(c.text or ''), text=c.text)
     return cards, used
 
 
@@ -440,9 +441,11 @@ def index():
                 continue
             if st['owned_only'] and not c['owned']:
                 continue
-            if q and q not in c['key'] and q != str(c['num']) and q != str(c['pas']):
+            if q and not textsearch.hit(q, c['key'], c['text_key'], (c['num'], c['pas'])):
                 continue
             out.append(c)
+        if q:
+            out.sort(key=lambda c: textsearch.rank(q, c['key'], c['text_key'], (c['num'], c['pas'])))
         return out
 
     def pickbar(text, actions, clear):

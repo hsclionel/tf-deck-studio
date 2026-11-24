@@ -108,13 +108,21 @@ the moon button switches dark/light mode.
 slot. A deck you have changed but not saved yet shows a **↺** button that puts it back to what is
 in the save.
 
+Each row also has **⧉ 复制到空位** (copy to a free slot, named `<name> 副本`) and **🗑 删除**
+(delete). Both are unsaved edits like any other: nothing happens to the save until you press 保存,
+the row stays with an ↺ until then, and 撤销 brings back what you changed. A deleted deck is
+written out of the save on 保存 — the slot is empty afterwards, exactly as if you had deleted it in
+the game.
+
 ## 4. Finding cards
 
 ![Filters](docs/images/04-filters.jpg)
 
-- **Search** (搜索卡名): Chinese, Japanese or English names (English/Japanese need the card name
-  download), the card number or the passcode. Full-width/half-width characters and separators
-  such as `·` are ignored, so `ehero` finds `Ｅ·ＨＥＲＯ`.
+- **Search**: Chinese, Japanese or English names (English/Japanese need the card name
+  download), the card number, the passcode, or a phrase from the effect text. Full-width/half-width
+  characters and separators such as `·` are ignored, so `ehero` finds `Ｅ·ＨＥＲＯ`.
+  Name and number matches come first, effect-text matches after them, so a card whose *name* has
+  the phrase is not buried under cards that only mention it.
 - **全部 / 怪兽 / 魔法 / 陷阱**: all, monsters, spells, traps.
 - **属性**: attribute (光 暗 水 炎 地 风 神).
 - **星级**: level — 1–4, 5–6, 7 or more, or one exact level 1–12. Xyz monsters count by rank.
@@ -201,7 +209,10 @@ One list of every ready-made deck, filtered by the open game:
   **下载**. Each shows the character, the star level and 🏆 for the strongest version.
 
 Search by deck or character name, filter by category, or turn on **冠军级** for the strongest
-decks only.
+decks only. With a save open, **可组** narrows the list to the decks that save can play right
+now — every copy owned and inside its ban list (with **按本游戏禁限卡表调整** on, the fitted deck
+is what gets checked, because that is what 载入 hands over). The count then reads `12 / 841`.
+Decks the list hides are still there; the switch is off by default.
 
 Opening a deck shows its cards and how well it fits your save:
 
@@ -286,7 +297,7 @@ has **从我的卡组删除** to remove it.
 ![Save review](docs/images/16-save-review.jpg)
 
 **保存** shows **写入存档前确认**: the save folder and every change per deck (cards added or removed
-per section, renamed decks). **写入存档** then:
+per section, renamed decks, deleted decks and the slots they free up). **写入存档** then:
 
 1. backs up the whole save folder (see [section 17](#17-where-files-are-kept));
 2. checks the save has not been changed by the game since you opened it — if it has, nothing is
@@ -303,7 +314,9 @@ the app loses nothing. When you open the save again, a yellow bar says which dec
 ![Restored edits](docs/images/17-restored.jpg)
 
 **知道了** hides the bar and keeps the edits; **丢掉** throws them away and shows the save as it
-is. If the game changed a deck in the meantime, the bar says so and shows your version.
+is. If the game changed a deck in the meantime, the bar says so and shows your version. Deleted
+decks are restored too — a deleted deck is an unsaved edit like any other, and the bar names the
+slots it took out.
 
 ## 14. Using it on a phone
 

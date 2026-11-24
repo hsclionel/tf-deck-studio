@@ -51,7 +51,7 @@ otherwise. The app may read owned counts and ban limits, never write them by def
   (save only: text cards, only cards already in the save's decks can be added) › numbers only.
 - Verified end to end on a copy of the memstick: empty workspace → numbers-only → names → ISO →
   rename + add card → save; CLI confirms 10 changed bytes in slot 2 and a byte-exact backup.
-- Not yet: text/YDK import & export, partner-deck browser, deleting decks, TFSP editing, packaging.
+- Not yet: text/YDK import & export, partner-deck browser, TFSP editing, packaging.
 
 ## 1b3. Built-in card-number lists (decided 2026-10-27)
 
@@ -118,7 +118,30 @@ stats are incomplete. UI: the `insights` button in the deck action bar opens a d
 
 Next candidates (user's wishlist): archetype view with upgrade
 suggestions (ygocdb setcode), ban-list replacement suggestions, online deck search feeding the
-importer, optional AI advice; plus deck delete/duplicate, partner-deck browser, packaging.
+importer, optional AI advice; plus partner-deck browser, packaging.
+
+## 1b7b. Deck slots, search and filters (2026-11-24)
+
+Four long-standing wishes, one pass:
+
+- **Delete and duplicate a deck** (issue #4). Both are working-set edits, so they ride the existing
+  draft/save machinery: `st['removed']` holds the slots deleted here, `mydecks.changed` writes them
+  into the draft as `null` so a reload does not resurrect them, and `Session.commit(decks, removed)`
+  clears the slot through `TF6Save.delete_deck` — in-use flag 0, name through side zeroed, the
+  same fields `write_deck` fills, nothing else touched. Deleting before writing means a duplicate
+  can land in a slot freed by the same save. Undo entries are now `('keep'|'del'|'new', slot,
+  deck)`.
+- **Effect-text search** (issue #2). `tfcore/textsearch.py` normalizes once and ranks hits: name,
+  number or passcode (2) › effect text (1) › no hit (0). The browser sorts by that rank, so text
+  matches appear below name matches instead of mixed in.
+- **可组 filter** (issue #1). Deck catalog, on only when a save with a mapped trunk is open:
+  `short_of(d) == 0` and no `S.problems` — the fitted deck when 按本游戏禁限卡表调整 is on. Cached
+  per entry and per (ban list, save, fit) setting, since the check walks every card of every entry.
+- **Tests**: `tests/test_textsearch.py`, delete/duplicate draft tests in `tests/test_mydecks.py`, and
+  a synthetic `delete_deck` test in `tests/test_tf6save.py` (no save file needed).
+
+Not here: the partner/CPU deck browser (issue #3). Nothing reads `0x154C0` yet and its acceptance
+criteria need a real save to verify against; the layout has to be mapped in-game first.
 
 ## 1b8. Deck catalog (卡组库, 2026-10-28)
 
