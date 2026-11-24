@@ -1,9 +1,10 @@
 """Labels and card widgets shared by the app pages."""
-import html, re, unicodedata
+import html
 
 from nicegui import ui
 
 from theme_css import CSS, EXTRA_CSS
+from tfcore import textsearch
 
 __all__ = ['CSS', 'EXTRA_CSS', 'ATTR', 'FRAME_LABEL', 'View', 'card_tile', 'real_card', 'search_key']
 
@@ -17,8 +18,11 @@ TUNER_LABEL = {1: '调整', 2: '黑暗调整'}
 
 
 def search_key(s):
-    """Full-width → half-width, lower case, separators dropped: 'Ｅ·ＨＥＲＯ　天空侠' → 'ehero天空侠'."""
-    return re.sub(r'[\s·・\-－_.,，。!！]', '', unicodedata.normalize('NFKC', s)).lower()
+    """Full-width → half-width, lower case, separators dropped: 'Ｅ·ＨＥＲＯ　天空侠' → 'ehero天空侠'.
+
+    The rules live in tfcore.textsearch so the tests can reach them without NiceGUI.
+    """
+    return textsearch.normalize(s)
 
 
 def stat(x):
@@ -28,7 +32,7 @@ def stat(x):
 
 class View:
     """What the widgets need to know about one card in the current session."""
-    __slots__ = ('card', 'art', 'owned', 'allowed', 'addable', 'key', 'tags')
+    __slots__ = ('card', 'art', 'owned', 'allowed', 'addable', 'key', 'text_key', 'tags')
 
     def __init__(self, card, art, trunk, addable, alt_names):
         self.card = card
@@ -36,6 +40,7 @@ class View:
         self.owned, self.allowed = trunk if trunk else (None, 3)
         self.addable = addable
         self.key = search_key(' '.join([card.name, *alt_names.values()]))
+        self.text_key = search_key(card.text or '')
         self.tags = frozenset()                         # tfcore.tags keys, set by the editor
 
     @property

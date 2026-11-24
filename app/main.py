@@ -15,7 +15,7 @@ from nicegui import app, run, ui
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from tfcore import deckcatalog, device, doctor, importer, mydecks, similar, tags, wikidecks, ygoprodeck  # noqa: E402
+from tfcore import deckcatalog, device, doctor, importer, mydecks, similar, tags, textsearch, wikidecks, ygoprodeck  # noqa: E402
 from tfcore.identify import identify_iso, identify_save  # noqa: E402
 from tfcore.savefolder import SaveChanged  # noqa: E402
 from tfcore.tf6save import NSLOTS, Deck  # noqa: E402
@@ -387,21 +387,30 @@ def edit_page():
         return {i: dict(name=d.name, main=list(d.main), extra=list(d.extra), side=list(d.side), stamp=d.stamp)
                 for i, d in S.save.decks().items()}
 
+    COPY_SUFFIX = ' 副本'
+
+    def free_slot():
+        """First slot with no deck in it: where a new deck, an import or a duplicate goes."""
+        return next((i for i in range(NSLOTS) if i not in st['work']), None)
+
     st = dict(query='', kind='all', attr=None, owned_only=src.kind != 'iso' and src.has_trunk, tags=set(), frames=set(), fav_only=False, stars=None, limit=120, tab='deck', selected=None, art={},
               multi_cards=False, multi_deck=False, pick_cards=set(), pick_deck=set(), history=[])
     st['orig'] = originals()
     st['work'] = {i: dict(d, main=list(d['main']), extra=list(d['extra']), side=list(d['side'])) for i, d in st['orig'].items()}
+    st['removed'] = set()        # decks deleted here that the save still has: cleared on 保存
     st['slot'] = min(st['work']) if st['work'] else 0
     # Unsaved edits from last time (page reload, closed tab): put them back and say so.
     draft = WS.drafts.load(S.folder.path)
     st['restored'] = mydecks.restore(st['work'], st['orig'], draft) if draft else None
-    st['persisted'] = json.dumps(mydecks.changed(st['work'], st['orig']), sort_keys=True)
     if st['restored']:
-        st['slot'] = st['restored'][0][0]
+        st['removed'] = set(st['restored'][2])
+    st['persisted'] = json.dumps(mydecks.changed(st['work'], st['orig'], st['removed']), sort_keys=True)
+    if st['restored']:
+        st['slot'] = st['restored'][0][0] if st['restored'][0] else (min(st['work']) if st['work'] else 0)
 
     def persist():
         """Write the unsaved edits to the draft file (only when they changed)."""
-        data = mydecks.changed(st['work'], st['orig'])
+        data = mydecks.changed(st['work'], st['orig'], st['removed'])
         key = json.dumps(data, sort_keys=True)
         if key != st['persisted']:
             st['persisted'] = key
@@ -410,6 +419,7 @@ def edit_page():
     def revert(i):
         """Drop the unsaved edits of slot i: back to the save's deck (or no deck for a new slot)."""
         snapshot_slot(i)
+        st['removed'].discard(i)
         if i in st['orig']:
             o = st['orig'][i]
             st['work'][i] = dict(o, main=list(o['main']), extra=list(o['extra']), side=list(o['side']))
@@ -421,16 +431,22 @@ def edit_page():
             st['restored'] = None
         refresh_all()
 
+    def copy_deck(w):
+        return {k: list(v) if isinstance(v, list) else v for k, v in w.items()}
+
     def snapshot_slot(i):
         if i in st['work']:
-            w = st['work'][i]
-            st['history'].append((i, {k: list(v) if isinstance(v, list) else v for k, v in w.items()}))
+            st['history'].append(('keep', i, copy_deck(st['work'][i])))
 
     def deck():
         return st['work'].setdefault(st['slot'], dict(name='新卡组', main=[], extra=[], side=[], stamp=None))
 
     def dirty(i):
+        if i in st['removed']:
+            return True
         w, o = st['work'].get(i), st['orig'].get(i)
+        if w is None:
+            return False
         if o is None:
             return bool(w and (w['main'] or w['extra'] or w['side']))
         return any(w[k] != o[k] for k in ('name', 'main', 'extra', 'side'))
@@ -449,7 +465,7 @@ def edit_page():
         return 'extra' if view(n).card.extra_deck else 'main'
 
     def snapshot():
-        st['history'].append((st['slot'], {k: list(v) if isinstance(v, list) else v for k, v in deck().items()}))
+        st['history'].append(('keep', st['slot'], copy_deck(deck())))
 
     def change(sec, n, delta):
         if delta > 0 and not view(n).addable:
@@ -463,11 +479,19 @@ def edit_page():
         refresh_all()
 
     def undo():
-        if st['history']:
-            slot, data = st['history'].pop()
+        """Step back one edit. History entries are ('keep'|'del'|'new', slot, deck before it)."""
+        if not st['history']:
+            return
+        kind, slot, data = st['history'].pop()
+        if kind == 'new':                    # 复制出来的卡组: put the slot back to empty
+            st['work'].pop(slot, None)
+            if slot in st['orig']:
+                st['removed'].add(slot)
+        else:
             st['work'][slot] = data
-            st['slot'] = slot
-            refresh_all()
+            st['removed'].discard(slot)
+        st['slot'] = slot
+        refresh_all()
 
     def toggle_multi(which):
         st[f'multi_{which}'] = not st[f'multi_{which}']
@@ -540,10 +564,60 @@ def edit_page():
                 ui.button('丢掉', on_click=lambda: (dlg.close(), revert(i))).props('unelevated color=negative no-caps')
         dlg.open()
 
+    def duplicate(i):
+        """Copy deck i into the first free slot as a new working deck (saved only on 保存)."""
+        w, free = st['work'].get(i), free_slot()
+        if w is None:
+            return
+        if free is None:
+            ui.notify(f'{NSLOTS} 个位置都占满了，先删掉一套再复制', type='warning')
+            return
+        base = (w['name'] or '新卡组').strip() or '新卡组'
+        st['work'][free] = dict(name=base[:63 - len(COPY_SUFFIX)] + COPY_SUFFIX, main=list(w['main']),
+                                extra=list(w['extra']), side=list(w['side']), stamp=None)
+        st['removed'].discard(free)
+        st['history'].append(('new', free, None))
+        st['slot'] = free
+        refresh_all()
+        ui.notify(f'已复制到 #{free}。点「保存」才写进存档。')
+
+    def delete_slot(i):
+        """Drop deck i from the working set; one that is in the save waits in `removed` for 保存."""
+        w = st['work'].pop(i, None)
+        if w is None:
+            return
+        st['history'].append(('del', i, copy_deck(w)))
+        if i in st['orig']:
+            st['removed'].add(i)
+        if st['slot'] == i:
+            st['slot'] = min(st['work']) if st['work'] else 0
+        refresh_all()
+
+    def confirm_delete(i):
+        w, saved = st['work'].get(i) or {}, i in st['orig']
+        with ui.dialog() as dlg, ui.card():
+            ui.label(f"删除「{w.get('name') or '（未命名）'}」？").classes('font-bold')
+            ui.label('点「保存」之后，这个位置才会在存档里真的空出来。' if saved
+                     else '这是还没保存的新卡组，删掉就没了。').classes('text-sm tf-muted')
+            ui.label('删掉后还能点「撤销」找回。').classes('text-xs tf-muted')
+            with ui.row().classes('w-full justify-end'):
+                ui.button('取消', on_click=dlg.close).props('flat no-caps')
+                ui.button('删除', on_click=lambda: (dlg.close(), delete_slot(i))) \
+                    .props('unelevated color=negative no-caps')
+        dlg.open()
+
     def drop_all_restored():
-        for i in list(st['restored'][0]):
+        slots, _, removed = st['restored']
+        for i in slots:
             revert(i)
+        for i in removed:                    # deleted by the draft: put the save's deck back
+            st['removed'].discard(i)
+            o = st['orig'].get(i)
+            if o is not None:
+                st['work'][i] = dict(o, main=list(o['main']), extra=list(o['extra']), side=list(o['side']))
+        st['restored'] = None
         ui.notify('已丢掉恢复的改动，卡组回到存档里的样子')
+        refresh_all()
 
     # ---------- header
     def header_chips():
@@ -565,19 +639,31 @@ def edit_page():
             for i in sorted(st['work']):
                 w = st['work'][i]
                 active = ' active' if i == st['slot'] else ''
-                with ui.element('div').classes('tf-slot' + active).on('click', lambda i=i: set_slot(i)):
-                    with ui.row().classes('items-center gap-1 no-wrap w-full'):
-                        ui.label(w['name'] or '（未命名）').classes('font-semibold')
+                stamp = w.get('stamp')
+                when = f"{stamp[0]}-{stamp[1]:02}-{stamp[2]:02}" if stamp else '新'
+                with ui.element('div').classes('tf-slot tf-slot-row' + active):
+                    # Only the name block opens the deck: the buttons sit beside it, so a click on
+                    # them does not also switch the editor to this slot.
+                    with ui.row().classes('items-center gap-0 no-wrap w-full'):
+                        with ui.column().classes('tf-slot-body gap-0 flex-1 min-w-0') \
+                                .on('click', lambda i=i: set_slot(i)):
+                            with ui.row().classes('items-center gap-1 no-wrap w-full min-w-0'):
+                                ui.label(w['name'] or '（未命名）') \
+                                    .classes('font-semibold ellipsis overflow-hidden whitespace-nowrap min-w-0')
+                                if dirty(i):
+                                    ui.icon('edit').classes('tf-dirty text-sm shrink-0') \
+                                        .tooltip('有没保存的改动，已自动暂存')
+                            ui.label(f"#{i} · {len(w['main'])}/{len(w['extra'])}/{len(w['side'])} · {when}") \
+                                .classes('text-xs tf-muted')
                         if dirty(i):
-                            ui.icon('edit').classes('tf-dirty text-sm').tooltip('有没保存的改动，已自动暂存')
-                            ui.space()
                             ui.button(icon='restart_alt', on_click=lambda i=i: confirm_revert(i)) \
                                 .props('flat round dense size=sm color=grey-6') \
                                 .tooltip('丢掉这套卡组没保存的改动')
-                    stamp = w.get('stamp')
-                    when = f"{stamp[0]}-{stamp[1]:02}-{stamp[2]:02}" if stamp else '新'
-                    ui.label(f"#{i} · {len(w['main'])}/{len(w['extra'])}/{len(w['side'])} · {when}").classes('text-xs tf-muted')
-            free = next((i for i in range(NSLOTS) if i not in st['work']), None)
+                        ui.button(icon='content_copy', on_click=lambda i=i: duplicate(i)) \
+                            .props('flat round dense size=sm color=grey-6').tooltip('复制到空位')
+                        ui.button(icon='delete_outline', on_click=lambda i=i: confirm_delete(i)) \
+                            .props('flat round dense size=sm color=grey-6').tooltip('删除这套卡组')
+            free = free_slot()
             if free is not None:
                 ui.button('新建卡组', icon='add', on_click=lambda: set_slot(free)).props('flat color=primary').classes('w-full mt-1')
         slot_list()
@@ -756,9 +842,12 @@ def edit_page():
                 continue
             if st['tags'] and not st['tags'] <= v.tags:
                 continue
-            if q and q not in v.key and q != str(c.num) and q != str(c.passcode):
+            if q and not textsearch.hit(q, v.key, v.text_key, (c.num, c.passcode)):
                 continue
             out.append(v)
+        if q:
+            # Name/number hits first, effect-text hits after them: both keep catalog order.
+            out.sort(key=lambda v: textsearch.rank(q, v.key, v.text_key, (v.card.num, v.card.passcode)))
         return out
 
     def pickbar(text, actions, clear):
@@ -793,13 +882,15 @@ def edit_page():
         d = deck()
         issues = [problem_zh(m) for m in S.problems(as_deck(d))] if d['main'] or d['extra'] or d['side'] else ['空卡组']
         if st['restored']:
-            slots, moved = st['restored']
+            slots, moved, removed = st['restored']
             with ui.element('div').classes('w-full px-3 pt-2'), \
                     ui.row().classes('w-full items-center gap-2 rounded px-2 py-1 bg-amber-1 text-amber-10'):
                 ui.icon('restore')
                 with ui.column().classes('gap-0 flex-1 min-w-0'):
-                    names = '、'.join(f"#{i}「{st['work'][i]['name']}」" for i in slots if i in st['work'])
-                    ui.label(f'恢复了上次没保存的改动：{names}').classes('text-xs')
+                    parts = [f"#{i}「{st['work'][i]['name']}」" for i in slots if i in st['work']]
+                    if removed:
+                        parts.append('删除 #' + '、#'.join(str(i) for i in sorted(removed)))
+                    ui.label('恢复了上次没保存的改动：' + '；'.join(parts)).classes('text-xs')
                     if moved:
                         ui.label('其中 ' + '、'.join(f'#{i}' for i in moved) + ' 在存档里又被游戏改过，这里显示的是你上次改的版本。') \
                             .classes('text-xs text-red-700')
@@ -867,7 +958,7 @@ def edit_page():
     def save_button():
         if st.get('push_pending'):
             ui.button('写回掌机', icon='upload', on_click=push).props('unelevated color=purple no-caps')                 .tooltip('上次没能写回掌机，改动已存在电脑上')
-        n_dirty = sum(dirty(i) for i in st['work'])
+        n_dirty = sum(1 for i in set(st['work']) | st['removed'] if dirty(i))
         ui.button(f'保存（{n_dirty}）' if n_dirty else '保存', icon='save', on_click=review) \
             .props('unelevated color=primary no-caps').classes('whitespace-nowrap').tooltip('保存到存档') \
             .set_enabled(n_dirty > 0)
@@ -921,7 +1012,7 @@ def edit_page():
 
     def open_import():
         imp = dict(text='', res=None, target='new', name='导入的卡组', extra={})
-        free = next((i for i in range(NSLOTS) if i not in st['work']), None)
+        free = free_slot()
         with ui.dialog().props('maximized-mobile') as dlg, \
                 ui.card().classes('w-full').style('max-width:760px; max-height:92dvh; overflow:auto'):
             ui.label('导入卡组').classes('text-lg font-bold')
@@ -1197,9 +1288,9 @@ def edit_page():
 
     # ---------- deck catalog
     def open_catalog():
-        cat = dict(query='', group=None, champion=False, limit=60, entry=None, target='new', busy=False, mode='local',
-                   fit=True)
-        free = next((i for i in range(NSLOTS) if i not in st['work']), None)
+        cat = dict(query='', group=None, champion=False, buildable=False, limit=60, entry=None, target='new',
+                   busy=False, mode='local', fit=True)
+        free = free_slot()
         imp = dict(text='', name='')
         by_pc = {**ygoprodeck.passcode_index(src.cards, importer.standins(src.cards)), **WS.passcodes.extra_index(src.cards)}
         limit = (lambda n: (S.trunk(n) or (3, 3))[1]) if src.has_trunk and S.save else None
@@ -1219,6 +1310,8 @@ def edit_page():
                 if cat['group'] and e.group != cat['group'] or cat['champion'] and not e.champion:
                     continue
                 if q and q not in search_key(f'{e.name} {e.character}'):
+                    continue
+                if cat['buildable'] and not buildable(e):
                     continue
                 out.append(e)
             return out
@@ -1253,12 +1346,38 @@ def edit_page():
                 return similar.fill(fitted, cuts, picks, cap_of)
             return {s: list(getattr(e, s)) for s in SECTIONS}
 
+        def fits(d, name):
+            """Whether the open save can build `d` as it is: every copy owned, inside the ban list."""
+            if short_of(d) != 0:
+                return False
+            return not S.problems(Deck(name, d['main'], d['extra'], d['side']))
+
+        def buildable(e):
+            """Whether 载入 would put a deck the open save can play right now (issue #1).
+
+            Checked on the deck as listed first, then on the fitted one when 适配 ban list is on,
+            because that is what 载入 hands over. Cached: the check walks every card of every
+            entry, and the catalog holds hundreds of them.
+            """
+            key = (e.key, S.banlist, id(S.save), cat['fit'])
+            cache = cat.setdefault('build', {})
+            if key not in cache:
+                ok = fits({s: list(getattr(e, s)) for s in SECTIONS}, e.name)
+                if not ok and cat['fit']:
+                    ok = fits(final(e), e.name)
+                cache[key] = ok
+            return cache[key]
+
         def load(e):
             d = final(e)
             snapshot()
             if cat['target'] == 'new':
-                st['work'][free] = dict(name='', main=[], extra=[], side=[], stamp=None)
-                st['slot'] = free
+                slot = free_slot()
+                if slot is None:
+                    ui.notify(f'{NSLOTS} 个位置都占满了，先删掉一套再载入', type='warning')
+                    return
+                st['work'][slot] = dict(name='', main=[], extra=[], side=[], stamp=None)
+                st['slot'] = slot
             deck().update(name=e.name[:63], main=d['main'], extra=d['extra'], side=d['side'])
             dlg.close()
             refresh_all()
@@ -1473,6 +1592,10 @@ def edit_page():
                 ui.switch('冠军级', value=cat['champion'],
                           on_change=lambda ev: (cat.update(champion=ev.value, limit=60), rows.refresh())) \
                     .tooltip('WCS 冠军卡组、认真卡组和每个角色最强的一套（Lv4）；网上的卡组看 9★ 以上的')
+                if S.save and src.has_trunk:
+                    ui.switch('可组', value=cat['buildable'],
+                              on_change=lambda ev: (cat.update(buildable=ev.value, limit=60), rows.refresh())) \
+                        .tooltip('只列出现在就能组的卡组：卡片够、且在存档的禁限卡表之内')
             if WS.wiki.supported(S.game.short):
                 with ui.row().classes('w-full items-center gap-2 text-xs tf-muted'):
                     if WS.wiki.has(S.game.short):
@@ -1490,9 +1613,14 @@ def edit_page():
         @ui.refreshable
         def rows():
             res = shown()
-            ui.label(f'{len(res)} 套卡组').classes('text-xs tf-muted mt-1')
+            total = len(data['all'])
+            ui.label(f'{len(res)} / {total} 套卡组' if cat['buildable'] else f'{len(res)} 套卡组') \
+                .classes('text-xs tf-muted mt-1')
             if not data['all']:
                 ui.label('还没有卡组。TFSP 要先添加 ISO，TF6 要先下载网上的卡组。').classes('tf-muted p-4')
+            elif not res:
+                ui.label('没有能用现在这副收藏组出来的卡组：卡片不够，或超出存档的禁限卡表。' if cat['buildable']
+                         else '没有符合条件的卡组。').classes('tf-muted p-4')
             with ui.column().classes('w-full gap-0').style('max-height:60vh;overflow:auto'):
                 for e in res[:cat['limit']]:
                     with ui.element('div').classes('tf-slot w-full').on('click', lambda e=e: open_local(e)):
@@ -1547,6 +1675,10 @@ def edit_page():
                 for msg in map(problem_zh, S.problems(as_deck(w))):
                     blocked = True
                     ui.label('⚠ ' + msg).classes('text-sm text-red-500')
+            for i in sorted(st['removed']):
+                o = st['orig'].get(i) or {}
+                ui.label(f"#{i} {o.get('name', '')}").classes('font-semibold mt-2')
+                ui.label('删除这套卡组（位置会变空）').classes('text-sm text-red-500')
             ui.label('写入前会先备份整个存档文件夹，写入后再读一遍校验。').classes('text-xs tf-muted mt-3')
             if S.dev:
                 ui.label(f'然后写回掌机 {S.device_meta["host"]}：先确认没有游戏在运行、存档没被游戏改过，'
@@ -1563,7 +1695,7 @@ def edit_page():
         client = ui.context.client
         dlg.close()
         try:
-            backup = S.commit({i: as_deck(st['work'][i]) for i in changed})
+            backup = S.commit({i: as_deck(st['work'][i]) for i in changed}, removed=sorted(st['removed']))
         except SaveChanged:
             with client:
                 ui.notify('打开之后，存档又被游戏改过。请回首页重新打开，再改一次。', type='negative', multi_line=True, timeout=0,
@@ -1576,6 +1708,7 @@ def edit_page():
         st['orig'] = originals()
         st['work'] = {i: dict(d, main=list(d['main']), extra=list(d['extra']), side=list(d['side'])) for i, d in st['orig'].items()}
         st['history'] = []
+        st['removed'] = set()
         if not S.dev:
             refresh_all()
             with client:
@@ -1621,7 +1754,7 @@ def edit_page():
             with ui.element('div').classes('tf-panel' + ('' if st['tab'] == 'cards' else ' tf-inactive')):
                 with ui.column().classes('gap-2 p-3 w-full'):
                     with ui.row().classes('w-full no-wrap items-center gap-2'):
-                        ui.input(placeholder='搜索卡名（中/日/英）、编号或密码…', value=st['query'],
+                        ui.input(placeholder='搜索卡名（中/日/英）、编号、密码或效果文字…', value=st['query'],
                                  on_change=lambda e: (st.update(query=e.value or '', limit=120), browser_grid.refresh())) \
                             .props('outlined dense clearable rounded debounce=150').classes('flex-1') \
                             .add_slot('prepend', '<q-icon name="search" />')

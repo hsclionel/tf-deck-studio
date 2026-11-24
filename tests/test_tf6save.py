@@ -6,7 +6,7 @@ import pytest
 from conftest import CHAIN
 from tfcore import savecrypto
 from tfcore.games import TAG_FORCE_KEY
-from tfcore.tf6save import Deck, TF6Save
+from tfcore.tf6save import DECKS, PLAIN_SIZE, Deck, SLOT_SIZE, TF6Save
 
 
 def plain(folder):
@@ -54,6 +54,19 @@ def test_new_slot_gets_fresh_tag_and_stamp(saves):
     new = s.deck(5)
     assert new.tag and new.tag < 1 << 20 and new.tag not in {s.deck(i).tag for i in range(3)}
     assert new.stamp[0] >= 2026
+
+
+def test_delete_clears_the_slot():
+    s = TF6Save(bytes(PLAIN_SIZE))                    # an empty save: no game data needed
+    s.write_deck(3, Deck('删掉我', [4007] * 40, [], []))
+    assert s.in_use(3) and s.free_slot() == 0
+    s.delete_deck(3)
+    assert not s.in_use(3) and 3 not in s.decks() and s.free_slot() == 0
+    o = DECKS + 3 * SLOT_SIZE
+    assert not any(s.data[o + 0x4:o + 0x176])         # name through side zeroed, flag stays put
+    assert s.deck(3).name == ''
+    s.write_deck(3, Deck('再来一次', [4007] * 40, [], []))   # the slot is writable again
+    assert s.in_use(3) and s.deck(3).name == '再来一次' and s.free_slot() == 0
 
 
 def test_rejects_bad_sizes(saves):

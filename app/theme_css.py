@@ -81,6 +81,9 @@ body { background:var(--tf-bg); }
 .tf-slot { border-radius:10px; padding:8px 10px; cursor:pointer; border:1px solid transparent; }
 .tf-slot:hover { background:rgba(127,127,127,.08); }
 .tf-slot.active { border-color:#3b82f6; background:rgba(59,130,246,.10); }
+/* slot drawer rows: only the name block opens the deck, the buttons must not */
+.tf-slot.tf-slot-row { cursor:default; }
+.tf-slot.tf-slot-row .tf-slot-body { cursor:pointer; }
 .tf-tab { border-top:3px solid transparent; }
 .tf-tab-on { border-top-color:#fbbf24; background:rgba(251,191,36,.12); font-weight:700; }
 .tf-pickbar { background:#f59e0b; color:#111; border-radius:12px; margin:6px 8px; padding:6px 8px; }
